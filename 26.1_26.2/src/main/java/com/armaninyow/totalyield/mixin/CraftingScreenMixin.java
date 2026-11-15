@@ -8,10 +8,13 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.CrafterMenu;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.MerchantContainer;
+import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.trading.MerchantOffer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -59,7 +62,8 @@ public class CraftingScreenMixin {
             && slot.getClass().getSimpleName().equals("NonInteractiveResultSlot");
         boolean isStonecutterResult = (self.getMenu() instanceof StonecutterMenu)
             && slot.index == 1;
-        if (!(slot instanceof ResultSlot) && !isCrafterResult && !isStonecutterResult) return;
+        boolean isMerchantResult = (self.getMenu() instanceof MerchantMenu) && slot.index == 2;
+        if (!(slot instanceof ResultSlot) && !isCrafterResult && !isStonecutterResult && !isMerchantResult) return;
 
         TotalYieldConfig cfg = TotalYieldConfig.get();
         boolean shiftHeld = totalyield$isShiftHeld();
@@ -94,7 +98,7 @@ public class CraftingScreenMixin {
             return;
         }
 
-        int ingredientStart, ingredientEnd;
+        int ingredientStart = 0, ingredientEnd = -1;
         if (self.getMenu() instanceof CraftingMenu) {
             ingredientStart = 1; ingredientEnd = 9;
         } else if (self.getMenu() instanceof CrafterMenu) {
@@ -103,12 +107,27 @@ public class CraftingScreenMixin {
             ingredientStart = 1; ingredientEnd = 4;
         } else if (self.getMenu() instanceof StonecutterMenu) {
             ingredientStart = 0; ingredientEnd = 0;
-        } else {
+        } else if (!(self.getMenu() instanceof MerchantMenu)) {
             return;
         }
 
         int maxCrafts         = Integer.MAX_VALUE;
         boolean hasIngredient = false;
+        if (self.getMenu() instanceof MerchantMenu merchant) {
+            // Same offer the game uses for the result slot (honours the selected trade).
+            MerchantOffer offer = merchant.slots.get(0).container instanceof MerchantContainer mc ? mc.getActiveOffer() : null;
+            ItemStack payA = merchant.slots.get(0).getItem();
+            ItemStack payB = merchant.slots.get(1).getItem();
+            if (offer != null && !offer.satisfiedBy(payA, payB) && offer.satisfiedBy(payB, payA)) {
+                ItemStack t = payA; payA = payB; payB = t; // vanilla accepts swapped payment slots
+            }
+            if (offer != null && offer.satisfiedBy(payA, payB)) {
+                ItemStack a = offer.getCostA(), b = offer.getCostB();
+                if (!a.isEmpty()) maxCrafts = Math.min(maxCrafts, payA.getCount() / a.getCount());
+                if (!b.isEmpty()) maxCrafts = Math.min(maxCrafts, payB.getCount() / b.getCount());
+                hasIngredient = maxCrafts > 0;
+            }
+        }
         for (int idx = ingredientStart; idx <= ingredientEnd; idx++) {
             ItemStack ing = self.getMenu().slots.get(idx).getItem();
             if (!ing.isEmpty()) {
